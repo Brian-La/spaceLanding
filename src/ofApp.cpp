@@ -18,12 +18,21 @@
 // setup scene, lighting, state and load geometry
 //
 void ofApp::setup(){
+    
     ofSetFrameRate(60);     //set frame rate to 60
     
     if(bg.load("geo/starfield.jpg"))        //check for image
         bgLoaded = true;
     else
-        cout << "unable to load background image" << endl;
+        cout << "Unable to load background image" << endl;
+    
+    if(exhaustSound.load("geo/exhaust.mp3")) {
+        sndLoaded = true;
+        exhaustSound.setVolume(0.1f);
+    }
+    else
+        cout << "Unable to load sound file" << endl;
+        
        
 	bDisplayPoints = false;
 	bAltKeyDown = false;
@@ -50,11 +59,6 @@ void ofApp::setup(){
 	moon.setScaleNormalization(false);
     //moon.setRotation(0, -15, 1, 0, 0);      //flatten moon obj. file
 
-	// create sliders for testing
-	//
-	gui.setup();
-	gui.add(numLevels.setup("Number of Octree Levels", 1, 1, 10));
-	bHide = false;
 
 	//  Create Octree for testing.
 	//
@@ -91,6 +95,7 @@ void ofApp::setup(){
     else    {
         cout << "Error: Can't load model" << endl;
     }
+    
 
 }
  
@@ -98,8 +103,19 @@ void ofApp::setup(){
 // incrementally update scene (animation)
 //
 void ofApp::update() {
-    updateForce(position, velocity);
-    lander.setPosition(position.x, position.y, position.z);
+    //upon game start...can pause and select lander position
+    if(gameStart) {
+        
+        //position, velocity, degVelocity, degAcceleration, rotation deg, force deg
+        updateForce(position, velocity, rotation, degVeloc, degForce);
+        lander.setPosition(position.x, position.y, position.z);     //set new position
+        lander.setRotation(0, rotation, 0, 1, 0);       //set new rotation
+        
+        
+        //telemetric sensor
+        if(aglON)
+            aglSensor(landerPoint);
+    }
 	
 }
 //--------------------------------------------------------------
@@ -111,10 +127,18 @@ void ofApp::draw() {
     str += "Frame Rate: " + std::to_string(ofGetFrameRate());
     ofSetColor(ofColor::white);
     ofDrawBitmapString(str, ofGetWindowWidth() -170, 15);
+    
+    //draw screen messages
+    //
+    //altitude display
+    string str1;
+    str1 += "Altitude: " + std::to_string(lander.getPosition().y - landerPoint.y);
+    ofDrawBitmapString(str1, 0, 15);
 
-	glDepthMask(false);
-	if (!bHide) gui.draw();
-	glDepthMask(true);
+    //fuel display
+    string str2;
+    str2 += "Fuel: " + std::to_string(fuel);
+    ofDrawBitmapString(str2, 0, 45);
 
 	cam.begin();
     
@@ -131,8 +155,9 @@ void ofApp::draw() {
     }
     ofPopMatrix();
     
+    
 	ofPushMatrix();
-
+    
     ofEnableLighting();              // shaded mode
     moon.drawFaces();
     ofMesh mesh;
@@ -210,6 +235,18 @@ void ofApp::draw() {
 		ofSetColor(ofColor::lightGreen);
 		ofDrawSphere(p, .02 * d.length());
 	}
+    
+    // if point selected and mode on, draw sensor
+    //
+    if(aglON) {
+        if (aglSelected) {
+            ofVec3f a = octree.mesh.getVertex(aglNode.points[0]);
+            ofVec3f b = a - lander.getPosition();
+            ofSetColor(ofColor::orangeRed);
+            ofDrawLine(lander.getPosition(), landerPoint);
+            ofDrawSphere(a, .02 * b.length());
+        }
+    }
 
 	ofPopMatrix();
     cam.end();
@@ -249,25 +286,49 @@ void ofApp::keyPressed(int key) {
     case ' ':
         gameStart = !gameStart;       //start game toggle w/ spacebar
         break;
+    case 'A':
+    case 'a':
+        aglON = !aglON;             //telemetry sensor toggle
+        break;
     case 'W':
     case 'w':
+        fuel--;                     //fuel reduction
+        exhaustSound.play();        //play sound
         forces += ofVec3f(0, 0, 5);     //scaled FORWARD force
         break;
     case 'S':
     case 's':
+        fuel--;
+        exhaustSound.play();
         forces += ofVec3f(0, 0, -5);     //scaled BACK thrust force
         break;
     case OF_KEY_UP:
+        fuel -= 2;
+        exhaustSound.play();
         forces += ofVec3f(0, 5, 0);     //scaled UP thrust force
         break;
     case OF_KEY_DOWN:
+        fuel--;
+        exhaustSound.play();
         forces += ofVec3f(0, -5, 0);     //scaled DOWN thrust force
         break;
     case OF_KEY_RIGHT:
+        fuel--;
+        exhaustSound.play();
         forces += ofVec3f(5, 0, 0);     //scaled RIGHT thrust force
         break;
     case OF_KEY_LEFT:
+        fuel--;
+        exhaustSound.play();
         forces += ofVec3f(-5, 0, 0);     //scaled LEFT thrust force
+        break;
+    case 'Q':
+    case 'q':
+        degForce = -75;     //forward rotation force
+        break;
+    case 'E':
+    case 'e':
+        degForce += 75;       //backward rotation force
         break;
 	case 'B':
 	case 'b':
@@ -364,9 +425,6 @@ void ofApp::mousePressed(int x, int y, int button) {
 	//
 	if (cam.getMouseInputEnabled()) return;
 
-	// if moving camera, don't allow mouse interaction
-//
-	if (cam.getMouseInputEnabled()) return;
 
 	// if rover is loaded, test for selection
 	//
@@ -407,7 +465,7 @@ bool ofApp::raySelectWithOctree(ofVec3f &pointRet) {
 	pointSelected = octree.intersect(ray, octree.root, selectedNode);
 
 	if (pointSelected) {
-		pointRet = octree.mesh.getVertex(selectedNode.points[0]);
+		pointRet = octree.mesh.getVertex(selectedNode.points[0]);       //point selected returned
 	}
 	return pointSelected;
 }
@@ -452,6 +510,9 @@ void ofApp::mouseDragged(int x, int y, int button) {
 //--------------------------------------------------------------
 void ofApp::mouseReleased(int x, int y, int button) {
 	bInDrag = false;
+    //assign new position as lander position upon release after game pause
+    position = lander.getPosition();
+    bLanderSelected = false;        //erase drawing bounds
 }
 
 
@@ -484,28 +545,59 @@ void ofApp::gotMessage(ofMessage msg){
 }
 
 //update the forces acting upon the lander
-void ofApp::updateForce(ofVec3f &p, ofVec3f &v) {
+void ofApp::updateForce(ofVec3f &p, ofVec3f &v, float &r, float &rv, float &f) {
 
     // update position based on velocity
     //
     p += (v / ofGetFrameRate());
+    r += (rv / 60);    //rotation
 
     // update acceleration with accumulated particles forces
     // remember :  (f = ma) OR (a = 1/m * f)
     //
     ofVec3f accel = acceleration;    // start with any acceleration already on the particle
     accel += (forces * (1.0 / mass));
+    
+    //rotation
+    float rcel = degAccel;
+    rcel += f;
+    
     v += (accel / ofGetFrameRate());
+    rv += (rcel / 60);     //rotation
     
     // add a little damping for good measure
     //
     v *= damping;
+    rv *= degDamp;
+    
     
     //reset all forces on lander by setting it to gravity + turbulent forces
     //
     forces.set(gravityForce + turbulentForce);
+    f = 0;
     
 }
+
+
+//alteration of raySelectWithOctree: replace w/ lander position
+void ofApp::aglSensor(ofVec3f &pointRet) {
+    ofVec3f origin = lander.getPosition();      //position of lander
+    ofVec3f rayPoint = origin + ofVec3f(0, -100, 0);       //downward sensor
+    ofVec3f rayDir = rayPoint - origin;
+    rayDir.normalize();
+    
+    //create ray
+    Ray ray = Ray(Vector3(rayPoint.x, rayPoint.y, rayPoint.z), Vector3(rayDir.x, rayDir.y, rayDir.z));
+    
+    aglSelected = octree.intersect(ray, octree.root, aglNode);      //call intersect function
+    
+    if(aglSelected) {
+        pointRet = octree.mesh.getVertex(aglNode.points[0]);
+    }
+    return aglSelected;
+    
+}
+
 
 
 //--------------------------------------------------------------

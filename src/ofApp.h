@@ -34,7 +34,7 @@ class ofApp : public ofBaseApp{
 		bool mouseIntersectPlane(ofVec3f planePoint, ofVec3f planeNorm, ofVec3f &point);
 		bool raySelectWithOctree(ofVec3f &pointRet);
 		glm::vec3 getMousePointOnPlane(glm::vec3 p , glm::vec3 n);
-        void updateForce(ofVec3f &p, ofVec3f &v);           //integrate method for force computations
+        void updateForce(ofVec3f &p, ofVec3f &v, float &r, float &rv, float &f);           //integrate method for force computations
 
         ofEasyCam cam;
 		ofxAssimpModelLoader moon, lander;
@@ -48,8 +48,7 @@ class ofApp : public ofBaseApp{
 		bool bInDrag = false;
 
 
-		ofxIntSlider numLevels;
-		ofxPanel gui;
+		int numLevels = 7;
 
 		bool bAltKeyDown;
 		bool bCtrlKeyDown;
@@ -65,17 +64,24 @@ class ofApp : public ofBaseApp{
 		bool bTerrainSelected;
     
         //Brian La--------------------------------------------------------------------------------
+        
+        //gameStart
+        bool gameStart = true;         //game start
+        //float lastTime;
+        //float currentTime;
+        int fuel = 1200;
     
-        //background
-        ofImage bg;             //image
-        bool bgLoaded = false;      //check if image loaded
+        //background & sound
+        ofImage bg;                     //image
+        bool bgLoaded = false;
+        ofSoundPlayer exhaustSound;      //sound player
+        bool sndLoaded = false;
     
         //camera togglers - static, tracking, lander-rotate, lander-ground
         bool staticCam = false;
         bool trackCam = false;
         bool rotateCam = false;
         bool groundCam = false;
-        bool gameStart = false;         //game start
     
         //scale factor
         float landerScale = 0.1;
@@ -85,6 +91,11 @@ class ofApp : public ofBaseApp{
         ofVec3f turbulentForce = ofVec3f(ofRandom(-0.0164, 0.0164), ofRandom(-0.0164, 0.0164), ofRandom(-0.0164, 0.0164));      //turbulence
     
         //angular forces
+        float rotation = 0.0;       //rotation value
+        float degVeloc = 0.0;    //velocity of rotation
+        float degAccel = 0.0;    //acceleration of rotation
+        float degForce = 0.0;   //rotation force
+        float degDamp = 0.99;    //deg damp
         
     
         //physics components for lander
@@ -93,7 +104,14 @@ class ofApp : public ofBaseApp{
         ofVec3f velocity = ofVec3f(0, 0, 0);           //lander velocity
         ofVec3f forces = gravityForce + turbulentForce;         //apply gravity force
         float mass = 1.0;           //default mass of lander
-        float damping = 0.999999;       //damp value
+        float damping = 0.99;       //damp value
+    
+        //telemetry sensor (altitude/AGL)
+        bool aglON = true;
+        bool aglSelected = false;       //if selection occurs
+        ofVec3f landerPoint;        //landerPoint
+        TreeNode aglNode;           //node selected by agl
+        void aglSensor(ofVec3f &pointRet);        //calculate telemetric sensor
         
     
         //---------------------------------------------------------------------------------------
