@@ -44,12 +44,14 @@ void ofApp::setup(){
 	cam.setDistance(30);
 	cam.setNearClip(.1);
 	cam.setFov(65.5);   // approx equivalent to 28mm in 35mm format
+    camPos = cam.getPosition();     //set current position
     
     
 	ofSetVerticalSync(true);
 	cam.disableMouseInput();
 	ofEnableSmoothing();
 	ofEnableDepthTest();
+    ofEnableLighting();
 
 	// setup rudimentary lighting 
 	//
@@ -91,6 +93,28 @@ void ofApp::setup(){
         glm::vec3 min = lander.getSceneMin(landerScale);        //scale
         glm::vec3 max = lander.getSceneMax(landerScale);
         landerBounds = Box(Vector3(min.x, min.y, min.z), Vector3(max.x, max.y, max.z));
+        
+        //load landerLight
+        landerLight.setup();
+        landerLight.setSpotlight();
+        landerLight.setScale(.01);
+        landerLight.setSpotlightCutOff(15);
+        landerLight.rotate(-90, ofVec3f(1, 0, 0));
+        landerLight.setAttenuation(2, .001, .001);
+        landerLight.setAmbientColor(ofFloatColor(0.1, 0.1, 0.1));
+        landerLight.setDiffuseColor(ofFloatColor(1, 1, 1));
+        landerLight.setSpecularColor(ofFloatColor(1, 1, 1));
+        
+        //load hoverLight
+        hoverLight.setup();
+        hoverLight.enable();
+        hoverLight.setPosition(ofVec3f(0, 30, 0));      //default
+        hoverLight.setAmbientColor(ofFloatColor(0.1, 0.1, 0.1));
+        hoverLight.setDiffuseColor(ofFloatColor(1, 1, 1));
+        hoverLight.setSpecularColor(ofFloatColor(1, 1, 1));
+        
+        
+        
     }
     else    {
         cout << "Error: Can't load model" << endl;
@@ -111,10 +135,39 @@ void ofApp::update() {
         lander.setPosition(position.x, position.y, position.z);     //set new position
         lander.setRotation(0, rotation, 0, 1, 0);       //set new rotation
         
+        //light switch
+        if(lightOn) {
+            landerLight.enable();
+            landerLight.setPosition(lander.getPosition());      //set light position
+        }
+        else
+            landerLight.disable();
         
-        //telemetric sensor
+        
         if(aglON)
-            aglSensor(landerPoint);
+            aglSensor(landerPoint);     //telemetric sensor
+        
+        
+        //switch based on camType - Brian L
+        //
+        switch(camType) {
+            case trackCam:
+                cam.setPosition(lander.getPosition() + ofVec3f(0, 2, -2));     //behind lander
+                //cam.rotateDeg(-rotation, ofVec3f(0, 1, 0));     //reverse cam rotation if present
+                cam.setTarget(lander.getPosition());
+                break;
+            case rotateCam:
+                cam.setPosition(lander.getPosition() + ofVec3f(0, -0.1, 0));      //rotate based on UP vector
+                cam.rotateDeg(degVeloc / ofGetFrameRate(), ofVec3f(0, 1, 0));
+                break;
+            case groundCam:
+                cam.setPosition(lander.getPosition());      //set at position
+                //cam.rotateDeg(-rotation, ofVec3f(0, 1, 0));     //reverse cam rotation if present
+                cam.setTarget(lander.getPosition() + ofVec3f(0, -1000, 0));     //downward
+                break;
+            default:
+                break;
+        }
     }
 	
 }
@@ -158,7 +211,7 @@ void ofApp::draw() {
     
 	ofPushMatrix();
     
-    ofEnableLighting();              // shaded mode
+    //ofEnableLighting();              // shaded mode
     moon.drawFaces();
     ofMesh mesh;
     if (bLanderLoaded) {
@@ -214,14 +267,11 @@ void ofApp::draw() {
 
 	// recursively draw octree
 	//
-	ofDisableLighting();
+	//ofDisableLighting();
 	int level = 0;
 	ofNoFill();
 
-    if (bDisplayLeafNodes) {
-        octree.drawLeafNodes(octree.root);
-    }
-    else if (bDisplayOctree) {
+    if (bDisplayOctree) {
         ofNoFill();
         ofSetColor(ofColor::white);
         octree.draw(numLevels, 0);
@@ -283,104 +333,119 @@ void ofApp::drawAxis(ofVec3f location) {
 void ofApp::keyPressed(int key) {
 
 	switch (key) {
-    case ' ':
-        gameStart = !gameStart;       //start game toggle w/ spacebar
-        break;
-    case 'A':
-    case 'a':
-        aglON = !aglON;             //telemetry sensor toggle
-        break;
-    case 'W':
-    case 'w':
-        fuel--;                     //fuel reduction
-        exhaustSound.play();        //play sound
-        forces += ofVec3f(0, 0, 5);     //scaled FORWARD force
-        break;
-    case 'S':
-    case 's':
-        fuel--;
-        exhaustSound.play();
-        forces += ofVec3f(0, 0, -5);     //scaled BACK thrust force
-        break;
-    case OF_KEY_UP:
-        fuel -= 2;
-        exhaustSound.play();
-        forces += ofVec3f(0, 5, 0);     //scaled UP thrust force
-        break;
-    case OF_KEY_DOWN:
-        fuel--;
-        exhaustSound.play();
-        forces += ofVec3f(0, -5, 0);     //scaled DOWN thrust force
-        break;
-    case OF_KEY_RIGHT:
-        fuel--;
-        exhaustSound.play();
-        forces += ofVec3f(5, 0, 0);     //scaled RIGHT thrust force
-        break;
-    case OF_KEY_LEFT:
-        fuel--;
-        exhaustSound.play();
-        forces += ofVec3f(-5, 0, 0);     //scaled LEFT thrust force
-        break;
-    case 'Q':
-    case 'q':
-        degForce = -75;     //forward rotation force
-        break;
-    case 'E':
-    case 'e':
-        degForce += 75;       //backward rotation force
-        break;
-	case 'B':
-	case 'b':
-		bDisplayBBoxes = !bDisplayBBoxes;
-		break;
-	case 'C':
-	case 'c':
-		if (cam.getMouseInputEnabled()) cam.disableMouseInput();
-		else cam.enableMouseInput();
-		break;
-	case 'F':
-	case 'f':
-		ofToggleFullscreen();
-		break;
-	case 'H':
-	case 'h':
-		break;
-    case 'L':
-    case 'l':
-        bDisplayLeafNodes = !bDisplayLeafNodes;
-        break;
-	case 'O':
-	case 'o':
-		bDisplayOctree = !bDisplayOctree;
-		break;
-    case 'R':
-	case 'r':
-		cam.reset();
-		break;
-	case 't':
-		setCameraTarget();
-		break;
-	case 'u':
-		break;
-	case 'v':
-		togglePointsDisplay();
-		break;
-	case 'V':
-		break;
-	case OF_KEY_ALT:
-		cam.enableMouseInput();
-		bAltKeyDown = true;
-		break;
-	case OF_KEY_CONTROL:
-		bCtrlKeyDown = true;
-		break;
-	case OF_KEY_SHIFT:
-		break;
-	case OF_KEY_DEL:
-		break;
-	default:
-		break;
+        case '1':
+            camType = staticCam;        //staticCam
+            cam.setPosition(camPos);        //set position to cam position
+            cam.setTarget(lander.getPosition());        //target land position once
+            //cam.rotateDeg(-rotation, ofVec3f(0, 1, 0));     //reverse cam rotation if present
+            break;
+        case '2':
+            camType = trackCam;     //track cam on
+            break;
+        case '3':
+            camType = rotateCam;   //ground cam on
+            break;
+        case '4':
+            camType = groundCam;   //rotate cam on
+            break;
+        case ' ':
+            gameStart = !gameStart;       //start game toggle w/ spacebar
+            break;
+        case 'A':
+        case 'a':
+            aglON = !aglON;             //telemetry sensor toggle
+            break;
+        case 'W':
+        case 'w':
+            fuel--;                     //fuel reduction
+            exhaustSound.play();        //play sound
+            forces += ofVec3f(0, 0, 5);     //scaled FORWARD force
+            break;
+        case 'S':
+        case 's':
+            fuel--;
+            exhaustSound.play();
+            forces += ofVec3f(0, 0, -5);     //scaled BACK thrust force
+            break;
+        case OF_KEY_UP:
+            fuel -= 2;
+            exhaustSound.play();
+            forces += ofVec3f(0, 5, 0);     //scaled UP thrust force
+            break;
+        case OF_KEY_DOWN:
+            fuel--;
+            exhaustSound.play();
+            forces += ofVec3f(0, -5, 0);     //scaled DOWN thrust force
+            break;
+        case OF_KEY_RIGHT:
+            fuel--;
+            exhaustSound.play();
+            forces += ofVec3f(5, 0, 0);     //scaled RIGHT thrust force
+            break;
+        case OF_KEY_LEFT:
+            fuel--;
+            exhaustSound.play();
+            forces += ofVec3f(-5, 0, 0);     //scaled LEFT thrust force
+            break;
+        case 'Q':
+        case 'q':
+            degForce = -75;     //forward rotation force
+            break;
+        case 'E':
+        case 'e':
+            degForce += 75;       //backward rotation force
+            break;
+        case 'B':
+        case 'b':
+            bDisplayBBoxes = !bDisplayBBoxes;
+            break;
+        case 'C':
+        case 'c':
+            if (cam.getMouseInputEnabled()) cam.disableMouseInput();
+            else cam.enableMouseInput();
+            break;
+        case 'F':
+        case 'f':
+            ofToggleFullscreen();
+            break;
+        case 'H':
+        case 'h':
+            break;
+        case 'L':
+        case 'l':
+            lightOn = !lightOn;
+            break;
+        case 'O':
+        case 'o':
+            bDisplayOctree = !bDisplayOctree;
+            break;
+        case 'R':
+        case 'r':
+            cam.reset();
+            break;
+        case 't':
+            setCameraTarget();
+            break;
+        case 'u':
+            break;
+        case 'v':
+            togglePointsDisplay();
+            break;
+        case 'V':
+            break;
+        case OF_KEY_ALT:
+            cam.enableMouseInput();
+            bAltKeyDown = true;
+            break;
+        case OF_KEY_CONTROL:
+            bCtrlKeyDown = true;
+            break;
+        case OF_KEY_SHIFT:
+            break;
+        case OF_KEY_DEL:
+            break;
+        default:
+            break;
 	}
 }
 
@@ -421,6 +486,7 @@ void ofApp::mouseMoved(int x, int y ){
 //--------------------------------------------------------------
 void ofApp::mousePressed(int x, int y, int button) {
 
+    mousePos = ofVec3f(x, y, 0);        //set target cam to position
 	// if moving camera, don't allow mouse interaction
 	//
 	if (cam.getMouseInputEnabled()) return;
@@ -449,8 +515,7 @@ void ofApp::mousePressed(int x, int y, int button) {
 		}
 	}
 	else {
-		ofVec3f p;
-		raySelectWithOctree(p);
+		raySelectWithOctree(camPos);        //assign camPos
 	}
 }
 
@@ -502,8 +567,7 @@ void ofApp::mouseDragged(int x, int y, int button) {
 
 	}
 	else {
-		ofVec3f p;
-		raySelectWithOctree(p);
+		raySelectWithOctree(camPos);
 	}
 }
 
@@ -520,7 +584,8 @@ void ofApp::mouseReleased(int x, int y, int button) {
 // Set the camera to use the selected point as it's new target
 //  
 void ofApp::setCameraTarget() {
-
+    ofVec3f rayPoint = cam.screenToWorld(mousePos);
+    cam.setTarget(rayPoint);
 }
 
 
@@ -634,7 +699,7 @@ void ofApp::initLightingAndMaterials() {
 
 	glEnable(GL_LIGHTING);
 	glEnable(GL_LIGHT0);
-//	glEnable(GL_LIGHT1);
+	//glEnable(GL_LIGHT1);
 	glShadeModel(GL_SMOOTH);
 } 
 

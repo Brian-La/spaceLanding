@@ -6,7 +6,7 @@
 #include "Octree.h"
 #include <glm/gtx/intersect.hpp>
 
-
+typedef enum { staticCam, trackCam, rotateCam, groundCam } TypeOfCam;
 
 class ofApp : public ofBaseApp{
 
@@ -38,7 +38,6 @@ class ofApp : public ofBaseApp{
 
         ofEasyCam cam;
 		ofxAssimpModelLoader moon, lander;
-		ofLight light;
 		Box boundingBox, landerBounds;
 		vector<Box> colBoxList;
 		bool bLanderSelected = false;
@@ -58,18 +57,18 @@ class ofApp : public ofBaseApp{
 		bool pointSelected = false;
 		bool bDisplayOctree = false;
 		bool bDisplayBBoxes = false;
-        bool bDisplayLeafNodes = false;
+        //bool bDisplayLeafNodes = false;
 		
 		bool bLanderLoaded;
 		bool bTerrainSelected;
     
         //Brian La--------------------------------------------------------------------------------
-        
         //gameStart
         bool gameStart = true;         //game start
         //float lastTime;
         //float currentTime;
         int fuel = 1200;
+    
     
         //background & sound
         ofImage bg;                     //image
@@ -77,18 +76,26 @@ class ofApp : public ofBaseApp{
         ofSoundPlayer exhaustSound;      //sound player
         bool sndLoaded = false;
     
-        //camera togglers - static, tracking, lander-rotate, lander-ground
-        bool staticCam = false;
-        bool trackCam = false;
-        bool rotateCam = false;
-        bool groundCam = false;
+    
+        //light
+        ofLight landerLight, hoverLight;
+        bool lightOn = false;       //lander light
+    
+    
+        //camera togglers - enumerated static, tracking, lander-rotate, lander-ground
+        TypeOfCam camType = staticCam;      //static came default
+        ofVec3f camPos;
+        ofVec3f mousePos = cam.getPosition();
+
     
         //scale factor
         float landerScale = 0.1;
     
+    
         //forces
         ofVec3f gravityForce = ofVec3f(0, -1.64 * landerScale, 0);      //gravity
         ofVec3f turbulentForce = ofVec3f(ofRandom(-0.0164, 0.0164), ofRandom(-0.0164, 0.0164), ofRandom(-0.0164, 0.0164));      //turbulence
+    
     
         //angular forces
         float rotation = 0.0;       //rotation value
@@ -106,15 +113,15 @@ class ofApp : public ofBaseApp{
         float mass = 1.0;           //default mass of lander
         float damping = 0.99;       //damp value
     
+    
         //telemetry sensor (altitude/AGL)
-        bool aglON = true;
+        bool aglON = false;
         bool aglSelected = false;       //if selection occurs
         ofVec3f landerPoint;        //landerPoint
         TreeNode aglNode;           //node selected by agl
         void aglSensor(ofVec3f &pointRet);        //calculate telemetric sensor
-        
-    
         //---------------------------------------------------------------------------------------
+    
 		ofVec3f selectedPoint;
 		ofVec3f intersectPoint;
 
