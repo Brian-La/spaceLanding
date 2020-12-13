@@ -33,7 +33,7 @@ public:
 	void draw(int numLevels, int level) {
 		draw(root, numLevels, level);
 	}
-	void drawLeafNodes(TreeNode & node);
+    void drawLeafNodes(TreeNode & node);
 	static void drawBox(const Box &box);
 	static Box meshBounds(const ofMesh &);
 	int getMeshPointsInBox(const ofMesh &mesh, const vector<int> & points, Box & box, vector<int> & pointsRtn);

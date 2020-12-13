@@ -45,11 +45,13 @@ class Box {
 		return allInside;
 	}
 
-	// implement for Homework Project
-	//
-	 bool overlap(const Box &box) {
-		 return false;
-	}
+    
+    //check if two boxes overlap
+    bool overlap(const Box &box) {
+        return ((box.parameters[0].x() <= max().x() && box.parameters[1].x() >= min().x()) &&
+                 (box.parameters[0].y() <= max().y() && box.parameters[1].y() >= min().y()) &&
+                 (box.parameters[0].z() <= max().z() && box.parameters[1].z() >= min().z()));
+    }
 
 	Vector3 center() {
 		return ((max() - min()) / 2 + min());
