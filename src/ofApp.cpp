@@ -13,7 +13,6 @@
 #include "ofApp.h"
 #include "Util.h"
 
-
 //--------------------------------------------------------------
 // setup scene, lighting, state and load geometry
 //
@@ -25,26 +24,18 @@ void ofApp::setup(){
         bgLoaded = true;
     else
         cout << "Unable to load background image" << endl;
-    
-    if(exhaustSound.load("geo/exhaust.mp3")) {
-        sndLoaded = true;
-        exhaustSound.setVolume(0.1f);
-    }
-    else
-        cout << "Unable to load sound file" << endl;
-        
        
 	bDisplayPoints = false;
 	bAltKeyDown = false;
 	bCtrlKeyDown = false;
 	bLanderLoaded = false;
-	bTerrainSelected = true;
     
     //camera setups
-	cam.setDistance(30);
+	cam.setDistance(25);
 	cam.setNearClip(.1);
 	cam.setFov(65.5);   // approx equivalent to 28mm in 35mm format
-    camPos = cam.getPosition();     //set current position
+    staticPos = cam.getPosition();      //save current position
+    camPos = staticPos;         //initialize
     
     
 	ofSetVerticalSync(true);
@@ -114,39 +105,47 @@ void ofApp::setup(){
         hoverLight.setSpecularColor(ofFloatColor(1, 1, 1));
         
         
+        //colorLight
+        colorLight.setup();
+        colorLight.enable();
+        colorLight.setSpotlight();
+        colorLight.setScale(0.01);
+        colorLight.setSpotlightCutOff(15);
+        colorLight.setPosition(ofVec3f(0, 5, -5));      //default
+        colorLight.setAmbientColor(ofFloatColor(0, 1, 0));
+        colorLight.setDiffuseColor(ofFloatColor(0, 1, 0));
+        //colorLight.setSpecularColor(ofFloatColor(1, 1, 1));
         
     }
-    else    {
+    else
         cout << "Error: Can't load model" << endl;
-    }
     
-
 }
  
 //--------------------------------------------------------------
 // incrementally update scene (animation)
 //
 void ofApp::update() {
+    //emitter update and re-position
+    emitter.update();
+    emitter.setCurrPos(lander.getPosition());
+    
     //upon game start...can pause and select lander position
     if(gameStart) {
+        
+        checkCollisions(forces);
+        if(fuel <= 0) {
+            gameStart = false;
+            gameOver = true;
+            cout << "OUT OF FUEL";
+        }
+
+        
         
         //position, velocity, degVelocity, degAcceleration, rotation deg, force deg
         updateForce(position, velocity, rotation, degVeloc, degForce);
         lander.setPosition(position.x, position.y, position.z);     //set new position
         lander.setRotation(0, rotation, 0, 1, 0);       //set new rotation
-        
-        //light switch
-        if(lightOn) {
-            landerLight.enable();
-            landerLight.setPosition(lander.getPosition());      //set light position
-        }
-        else
-            landerLight.disable();
-        
-        
-        if(aglON)
-            aglSensor(landerPoint);     //telemetric sensor
-        
         
         //switch based on camType - Brian L
         //
@@ -162,12 +161,41 @@ void ofApp::update() {
                 break;
             case groundCam:
                 cam.setPosition(lander.getPosition());      //set at position
-                //cam.rotateDeg(-rotation, ofVec3f(0, 1, 0));     //reverse cam rotation if present
-                cam.setTarget(lander.getPosition() + ofVec3f(0, -1000, 0));     //downward
+                break;
+            case traverseCam:
+                cam.setPosition(camPos);        //set position to cam position
                 break;
             default:
+                cam.setPosition(staticPos);        //set position to cam position
                 break;
         }
+        
+        //light switch
+        if(lightOn) {
+            landerLight.enable();
+            landerLight.setPosition(lander.getPosition());      //set light position
+        }
+        else
+            landerLight.disable();
+        
+        
+        if(aglON)
+            aglSensor(landerPoint);     //telemetric sensor
+        
+        //check game status
+        if(gameOver) {
+            status = "FAILED. PRESS = to RESTART.";      //display message
+            statColor = ofColor::red;
+        }
+        else if(gameWin) {
+            status = "SUCCESS. PRESS = to PLAY AGAIN.";      //display message
+            statColor = ofColor::green;
+        }
+    }           //end gameStart
+    else if(gameOver) {     //lander K'BOOM
+        ofVec3f random = lander.getPosition() + ofVec3f(ofRandom(0, 1), ofRandom(0, 1), ofRandom(0, 1));
+        lander.setPosition(random.x, random.y, random.z);     //set new position
+        lander.setRotation(1, ofRandom(-10, 10), ofRandom(0, 1), ofRandom(0, 1), ofRandom(0, 1));       //set new rotation
     }
 	
 }
@@ -176,6 +204,13 @@ void ofApp::draw() {
     ofBackground(ofColor::black);
     // draw screen data
     //
+   
+    //mission display
+    string str3;
+    str3 += "MISSION: " + status;
+    ofSetColor(statColor);
+    ofDrawBitmapString(str3, 0, 45);
+    
     string str;
     str += "Frame Rate: " + std::to_string(ofGetFrameRate());
     ofSetColor(ofColor::white);
@@ -191,7 +226,7 @@ void ofApp::draw() {
     //fuel display
     string str2;
     str2 += "Fuel: " + std::to_string(fuel);
-    ofDrawBitmapString(str2, 0, 45);
+    ofDrawBitmapString(str2, 0, 30);
 
 	cam.begin();
     
@@ -210,13 +245,12 @@ void ofApp::draw() {
     
     
 	ofPushMatrix();
-    
+    emitter.draw();
     //ofEnableLighting();              // shaded mode
     moon.drawFaces();
     ofMesh mesh;
     if (bLanderLoaded) {
         lander.drawFaces();
-        if (!bTerrainSelected) drawAxis(lander.getPosition());
         if (bDisplayBBoxes) {
             ofNoFill();
             ofSetColor(ofColor::white);
@@ -246,8 +280,6 @@ void ofApp::draw() {
             }
         }
     }
-    
-	if (bTerrainSelected) drawAxis(ofVec3f(0, 0, 0));
 
 
 
@@ -282,7 +314,7 @@ void ofApp::draw() {
 	if (pointSelected) {
 		ofVec3f p = octree.mesh.getVertex(selectedNode.points[0]);
 		ofVec3f d = p - cam.getPosition();
-		ofSetColor(ofColor::lightGreen);
+		ofSetColor(ofColor::lightBlue);
 		ofDrawSphere(p, .02 * d.length());
 	}
     
@@ -302,41 +334,13 @@ void ofApp::draw() {
     cam.end();
 }
 
-// 
-// Draw an XYZ axis in RGB at world (0,0,0) for reference.
-//
-void ofApp::drawAxis(ofVec3f location) {
-
-	ofPushMatrix();
-	ofTranslate(location);
-
-	ofSetLineWidth(1.0);
-
-	// X Axis
-	ofSetColor(ofColor(255, 0, 0));
-	ofDrawLine(ofPoint(0, 0, 0), ofPoint(1, 0, 0));
-	
-
-	// Y Axis
-	ofSetColor(ofColor(0, 255, 0));
-	ofDrawLine(ofPoint(0, 0, 0), ofPoint(0, 1, 0));
-
-	// Z Axis
-	ofSetColor(ofColor(0, 0, 255));
-	ofDrawLine(ofPoint(0, 0, 0), ofPoint(0, 0, 1));
-
-	ofPopMatrix();
-    
-}
-
 
 void ofApp::keyPressed(int key) {
-
+    
 	switch (key) {
         case '1':
             camType = staticCam;        //staticCam
-            cam.setPosition(camPos);        //set position to cam position
-            cam.setTarget(lander.getPosition());        //target land position once
+            cam.setTarget(ofVec3f(0, 0, -1000));        //target land position once
             //cam.rotateDeg(-rotation, ofVec3f(0, 1, 0));     //reverse cam rotation if present
             break;
         case '2':
@@ -347,6 +351,11 @@ void ofApp::keyPressed(int key) {
             break;
         case '4':
             camType = groundCam;   //rotate cam on
+            cam.setTarget(lander.getPosition() + ofVec3f(0, -1000, 0));     //downward
+            break;
+        case '5':
+            camType = traverseCam;
+            cam.setTarget(lander.getPosition());        //target land position once
             break;
         case ' ':
             gameStart = !gameStart;       //start game toggle w/ spacebar
@@ -358,34 +367,40 @@ void ofApp::keyPressed(int key) {
         case 'W':
         case 'w':
             fuel--;                     //fuel reduction
-            exhaustSound.play();        //play sound
-            forces += ofVec3f(0, 0, 5);     //scaled FORWARD force
+            emitter.start();           //start emitter and one shot
+            emitter.setOneShot(true);
+            forces += ofVec3f(0, 0, 5);
             break;
         case 'S':
         case 's':
             fuel--;
-            exhaustSound.play();
-            forces += ofVec3f(0, 0, -5);     //scaled BACK thrust force
+            emitter.start();           //start emitter and one shot
+            emitter.setOneShot(true);
+            forces += ofVec3f(0, 0, -5);
             break;
         case OF_KEY_UP:
             fuel -= 2;
-            exhaustSound.play();
+            emitter.start();           //start emitter and one shot
+            emitter.setOneShot(true);
             forces += ofVec3f(0, 5, 0);     //scaled UP thrust force
             break;
         case OF_KEY_DOWN:
             fuel--;
-            exhaustSound.play();
+            emitter.start();           //start emitter and one shot
+            emitter.setOneShot(true);
             forces += ofVec3f(0, -5, 0);     //scaled DOWN thrust force
             break;
         case OF_KEY_RIGHT:
             fuel--;
-            exhaustSound.play();
-            forces += ofVec3f(5, 0, 0);     //scaled RIGHT thrust force
+            emitter.start();           //start emitter and one shot
+            emitter.setOneShot(true);
+            forces += ofVec3f(-5, 0, 0);     //scaled RIGHT thrust force
             break;
         case OF_KEY_LEFT:
             fuel--;
-            exhaustSound.play();
-            forces += ofVec3f(-5, 0, 0);     //scaled LEFT thrust force
+            emitter.start();           //start emitter and one shot
+            emitter.setOneShot(true);
+            forces += ofVec3f(5, 0, 0);     //scaled LEFT thrust force
             break;
         case 'Q':
         case 'q':
@@ -408,9 +423,6 @@ void ofApp::keyPressed(int key) {
         case 'f':
             ofToggleFullscreen();
             break;
-        case 'H':
-        case 'h':
-            break;
         case 'L':
         case 'l':
             lightOn = !lightOn;
@@ -423,15 +435,13 @@ void ofApp::keyPressed(int key) {
         case 'r':
             cam.reset();
             break;
+        case 'T':
         case 't':
             setCameraTarget();
             break;
-        case 'u':
-            break;
+        case 'V':
         case 'v':
             togglePointsDisplay();
-            break;
-        case 'V':
             break;
         case OF_KEY_ALT:
             cam.enableMouseInput();
@@ -449,15 +459,34 @@ void ofApp::keyPressed(int key) {
 	}
 }
 
-void ofApp::toggleSelectTerrain() {
-	bTerrainSelected = !bTerrainSelected;
-}
-
 void ofApp::togglePointsDisplay() {
 	bDisplayPoints = !bDisplayPoints;
 }
 
 void ofApp::keyReleased(int key) {
+    
+    //UI messages
+    if(gameStart && key == ' ') {
+        statColor = ofColor::yellow;
+        status = "LAND SAFELY";
+    }
+    else if (!gameStart && key == ' ') {
+        statColor = ofColor::white;
+        status = "PAUSED";
+    }
+    else if ((gameWin || gameOver) && key == '=') {
+        gameWin = false;
+        gameOver = false;
+        gameStart = true;
+        fuel = 250;
+        position = startingPosition;
+        rotation = 0;
+        statColor = ofColor::yellow;
+        status = "LAND SAFELY";
+        emitter.setEmitterType(DirectionalEmitter);
+        impulseForce.set(0, 0, 0);
+    }
+    
 	switch (key) {
 	case OF_KEY_ALT:
 		cam.disableMouseInput();
@@ -486,7 +515,7 @@ void ofApp::mouseMoved(int x, int y ){
 //--------------------------------------------------------------
 void ofApp::mousePressed(int x, int y, int button) {
 
-    mousePos = ofVec3f(x, y, 0);        //set target cam to position
+    ofVec3f mousePos = ofVec3f(x, y, 0);
 	// if moving camera, don't allow mouse interaction
 	//
 	if (cam.getMouseInputEnabled()) return;
@@ -584,7 +613,8 @@ void ofApp::mouseReleased(int x, int y, int button) {
 // Set the camera to use the selected point as it's new target
 //  
 void ofApp::setCameraTarget() {
-    ofVec3f rayPoint = cam.screenToWorld(mousePos);
+    ofVec2f mouse(mouseX, mouseY);
+    ofVec3f rayPoint = cam.screenToWorld(glm::vec3(mouseX, mouseY, 0));
     cam.setTarget(rayPoint);
 }
 
@@ -638,9 +668,43 @@ void ofApp::updateForce(ofVec3f &p, ofVec3f &v, float &r, float &rv, float &f) {
     
     //reset all forces on lander by setting it to gravity + turbulent forces
     //
-    forces.set(gravityForce + turbulentForce);
-    f = 0;
+    forces.set(gravityForce + turbulentForce);      //turbulence and gravity default
+
     
+    f = 0;      //rotational force set to 0
+    
+}
+
+
+//check for collisions (impulse force)
+void ofApp::checkCollisions(ofVec3f &imp) {
+    ofVec3f min = lander.getSceneMin(landerScale) + lander.getPosition();
+    ofVec3f max = lander.getSceneMax(landerScale) + lander.getPosition();
+
+    Box bounds = Box(Vector3(min.x, min.y, min.z), Vector3(max.x, max.y, max.z));
+    if(octree.intersect(bounds, octree.root, colBoxList)) {
+        ofVec3f norm = ofVec3f(0, 1, 0);
+        
+        //force = (restitution + 1) * (-vdotn) * n
+        imp = (restitution + 1.0) * (dot(-velocity, norm)) * norm;
+        forces += (imp * ofGetFrameRate());       //add to forces
+        
+        if(imp.y > winCon) {
+            gameOver = true;        //if impulse force is greater than designated value
+            gameStart = false;
+            emitter.setEmitterType(RadialEmitter);
+            emitter.start();            //explosion once
+            emitter.setOneShot(true);
+        }
+        else {
+            gameWin = true;
+        }
+        
+    }
+}
+
+float ofApp::dot(ofVec3f obj1, ofVec3f obj2) {
+    return ((obj1.x * obj2.x) + (obj1.y * obj2.y) + (obj1.z * obj2.z));
 }
 
 
@@ -659,7 +723,8 @@ void ofApp::aglSensor(ofVec3f &pointRet) {
     if(aglSelected) {
         pointRet = octree.mesh.getVertex(aglNode.points[0]);
     }
-    return aglSelected;
+    //else
+        //pointRet = ofVec3f(0, -100, 0);
     
 }
 

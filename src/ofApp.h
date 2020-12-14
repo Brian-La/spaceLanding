@@ -5,8 +5,10 @@
 #include "ofxAssimpModelLoader.h"
 #include "Octree.h"
 #include <glm/gtx/intersect.hpp>
+#include "ParticleEmitter.h"
+#include "Particle.h"
 
-typedef enum { staticCam, trackCam, rotateCam, groundCam } TypeOfCam;
+typedef enum { staticCam, trackCam, rotateCam, groundCam, traverseCam } TypeOfCam;
 
 class ofApp : public ofBaseApp{
 
@@ -26,15 +28,12 @@ class ofApp : public ofBaseApp{
 		void windowResized(int w, int h);
 		void dragEvent(ofDragInfo dragInfo);
 		void gotMessage(ofMessage msg);
-		void drawAxis(ofVec3f);
 		void initLightingAndMaterials();
 		void togglePointsDisplay();
-		void toggleSelectTerrain();
 		void setCameraTarget();
 		bool mouseIntersectPlane(ofVec3f planePoint, ofVec3f planeNorm, ofVec3f &point);
 		bool raySelectWithOctree(ofVec3f &pointRet);
 		glm::vec3 getMousePointOnPlane(glm::vec3 p , glm::vec3 n);
-        void updateForce(ofVec3f &p, ofVec3f &v, float &r, float &rv, float &f);           //integrate method for force computations
 
         ofEasyCam cam;
 		ofxAssimpModelLoader moon, lander;
@@ -60,32 +59,34 @@ class ofApp : public ofBaseApp{
         //bool bDisplayLeafNodes = false;
 		
 		bool bLanderLoaded;
-		bool bTerrainSelected;
     
         //Brian La--------------------------------------------------------------------------------
         //gameStart
         bool gameStart = true;         //game start
+        bool gameOver = false;         //game over
+        bool gameWin = false;          //game win
+        string status = "LAND SAFELY (MIND YOUR FUEL)";
+        ofColor statColor = ofColor::yellow;        //status color
         //float lastTime;
         //float currentTime;
-        int fuel = 1200;
+        int fuel = 250;         //fuel limit
+        float winCon = 5;         //collide value for success
     
     
         //background & sound
         ofImage bg;                     //image
         bool bgLoaded = false;
-        ofSoundPlayer exhaustSound;      //sound player
-        bool sndLoaded = false;
     
     
         //light
-        ofLight landerLight, hoverLight;
+        ofLight landerLight, hoverLight, colorLight;
         bool lightOn = false;       //lander light
     
     
         //camera togglers - enumerated static, tracking, lander-rotate, lander-ground
         TypeOfCam camType = staticCam;      //static came default
         ofVec3f camPos;
-        ofVec3f mousePos = cam.getPosition();
+        ofVec3f staticPos;      //save static pos
 
     
         //scale factor
@@ -93,8 +94,14 @@ class ofApp : public ofBaseApp{
     
     
         //forces
+        void updateForce(ofVec3f &p, ofVec3f &v, float &r, float &rv, float &f);           //integrate method for force computations
         ofVec3f gravityForce = ofVec3f(0, -1.64 * landerScale, 0);      //gravity
         ofVec3f turbulentForce = ofVec3f(ofRandom(-0.0164, 0.0164), ofRandom(-0.0164, 0.0164), ofRandom(-0.0164, 0.0164));      //turbulence
+    
+        ofVec3f impulseForce = ofVec3f(0, 0, 0);            //impulse
+        float restitution = 0.5;        //bounciness
+        void checkCollisions(ofVec3f &f);       //impulse force
+        float dot(ofVec3f obj1, ofVec3f obj2);      //dot product
     
     
         //angular forces
@@ -106,7 +113,8 @@ class ofApp : public ofBaseApp{
         
     
         //physics components for lander
-        ofVec3f position = ofVec3f(0, 20, 0);     //set back terrain
+        ofVec3f startingPosition = ofVec3f(0, 20, -30);
+        ofVec3f position = startingPosition;     //set back terrain
         ofVec3f acceleration = ofVec3f(0, 0, 0);     //moon
         ofVec3f velocity = ofVec3f(0, 0, 0);           //lander velocity
         ofVec3f forces = gravityForce + turbulentForce;         //apply gravity force
@@ -117,9 +125,20 @@ class ofApp : public ofBaseApp{
         //telemetry sensor (altitude/AGL)
         bool aglON = false;
         bool aglSelected = false;       //if selection occurs
-        ofVec3f landerPoint;        //landerPoint
+        ofVec3f landerPoint = ofVec3f(0, -100, 0);        //landerPoint
         TreeNode aglNode;           //node selected by agl
         void aglSensor(ofVec3f &pointRet);        //calculate telemetric sensor
+    
+    
+        //exhaust particles
+        float lifespan = 5;         //lifespan of particles
+        float rate = 3;             //rate of emission
+        float radius = 5;           //radius of particles
+        float speed = 5;            //speed of particles
+    
+        ParticleEmitter emitter;
+    
+    
         //---------------------------------------------------------------------------------------
     
 		ofVec3f selectedPoint;
